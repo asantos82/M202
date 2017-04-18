@@ -208,7 +208,6 @@ mongo --port 30999
 * List existing tags
 ```bash
 mongo --port 30999
-> sh.stopBalancer();
 > use config
 switched to db config
 mongos> db.tags.find()
