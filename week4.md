@@ -158,43 +158,115 @@ Following initialization, your system will contain the collection testDB.testCol
 Your assignment is to move all data for the month of January 2014 into LTS as part of periodic maintenance. For this problem we are pretty sure you can "solve" it in a couple of ways that are not ideal. In an ideal solution you will make the balancer do the work for you. Please note that the balancer must be running when you turn in your solution.
 
 ### Answer
-* Deploy sharding cluster with 3 shards
+* Initiate DB
+
+After creating the cluster, initiate it via the mongoProc app
+
+* Validate that the DB has been populated
+
+Execute several times the sh.status() until the number of chunks in each shards is steady
+
 ```bash
-mkdir -p shard/s1
-mkdir -p shard/s2
-mkdir -p shard/s3
-mkdir -p shard/cfg
-
-mongod --configsvr --dbpath shard/cfg --port 27003 --fork --logpath log.cfg --logappend -bind_ip 127.0.0.1
-mongod --shardsvr --dbpath shard/s1 --logpath log.s1 --port 27000 --fork --logappend --smallfiles --oplogSize 50 -bind_ip 127.0.0.1
-mongod --shardsvr --dbpath shard/s2 --logpath log.s2 --port 27001 --fork --logappend --smallfiles --oplogSize 50 -bind_ip 127.0.0.1
-mongod --shardsvr --dbpath shard/s3 --logpath log.s3 --port 27002 --fork --logappend --smallfiles --oplogSize 50 -bind_ip 127.0.0.1
-mongos --configdb localhost:27003 --fork --logappend --port 30999 --logpath log.mongos -bind_ip 127.0.0.1
-
 mongo --port 30999
-> use admin
-> db.runCommand({addShard: "localhost:27000", name: "shard0"})
-> db.runCommand({addShard: "localhost:27001", name: "shard1"})
-> db.runCommand({addShard: "localhost:27002", name: "shard2"})
+mongos> sh.status()
+--- Sharding Status ---
+  sharding version: {
+    "_id" : 1,
+    "minCompatibleVersion" : 5,
+    "currentVersion" : 6,
+    "clusterId" : ObjectId("58f5d8c770e65b42550653b6")
+}
+  shards:
+    {  "_id" : "shard0000",  "host" : "localhost:30000",  "tags" : [ "LTS" ] }
+    {  "_id" : "shard0001",  "host" : "localhost:30001",  "tags" : [ "STS" ] }
+    {  "_id" : "shard0002",  "host" : "localhost:30002",  "tags" : [ "LTS" ] }
+  balancer:
+    Currently enabled:  yes
+    Currently running:  no
+    Failed balancer rounds in last 5 attempts:  0
+    Migration Results for the last 24 hours:
+        48 : Success
+  databases:
+    {  "_id" : "admin",  "partitioned" : false,  "primary" : "config" }
+    {  "_id" : "testDB",  "partitioned" : true,  "primary" : "shard0001" }
+        testDB.testColl
+            shard key: { "createdDate" : 1 }
+            chunks:
+                shard0000    46
+                shard0001    121
+                shard0002    47
+            too many chunks to print, use verbose if you want to force print
+             tag: LTS  { "createdDate" : ISODate("2013-10-01T00:00:00Z") } -->> { "createdDate" : ISODate("2014-01-01T00:00:00Z") }
+             tag: STS  { "createdDate" : ISODate("2014-01-01T00:00:00Z") } -->> { "createdDate" : ISODate("2014-05-01T00:00:00Z") }
 ```
+
 * Stop Balancer
 ```bash
 mongo --port 30999
 > sh.stopBalancer();
 ```
+* List existing tags
+```bash
+mongo --port 30999
+> sh.stopBalancer();
+> use config
+switched to db config
+mongos> db.tags.find()
+{ "_id" : { "ns" : "testDB.testColl", "min" : { "createdDate" : ISODate("2013-10-01T00:00:00Z") } }, "max" : { "createdDate" : ISODate("2014-01-01T00:00:00Z") }, "ns" : "testDB.testColl", "tag" : "LTS", "min" : { "createdDate" : ISODate("2013-10-01T00:00:00Z") } }
+{ "_id" : { "ns" : "testDB.testColl", "min" : { "createdDate" : ISODate("2014-01-01T00:00:00Z") } }, "max" : { "createdDate" : ISODate("2014-05-01T00:00:00Z") }, "ns" : "testDB.testColl", "tag" : "STS", "min" : { "createdDate" : ISODate("2014-01-01T00:00:00Z") } }
+```
+
 * Create new tag ranges
 ```
 mongo --port 30999
+> use config
 mongos> sh.addTagRange("testDB.testColl", {createdDate : ISODate("2013-10-01T00:00:00Z")}, {createdDate : ISODate("2014-02-01T00:00:00Z")}, "LTS")
 mongos> sh.addTagRange('testDB.testColl', {createdDate : ISODate("2014-02-01")}, {createdDate : ISODate("2014-05-01")}, "STS")
+```
+* Delete old STS tag ranges 
+```bash
+mongo --port 30999
+> use config
+mongos> db.tags.remove({ "_id" : { "ns" : "testDB.testColl", "min" : { "createdDate" : ISODate("2014-01-01T00:00:00Z") } }, "max" : { "createdDate" : ISODate("2014-05-01T00:00:00Z") }, "ns" : "testDB.testColl", "tag" : "STS", "min" : { "createdDate" : ISODate("2014-01-01T00:00:00Z") } })
+WriteResult({ "nRemoved" : 1 })
 ```
 * Start Balancer
 ```bash
 mongo --port 30999
-> sh.stopBalancer();
+> sh.startBalancer();
 ```
-* Remove old tag range and balancer will start migration
+* Wait for balance to compleat
 ```bash
 mongo --port 30999
-mongos> db.tags.remove({_id : { ns : "testDB.testColl", min : { createdDate : ISODate("2014-01-01")} }, tag: "STS" })
+mongos> sh.status()
+--- Sharding Status ---
+  sharding version: {
+    "_id" : 1,
+    "minCompatibleVersion" : 5,
+    "currentVersion" : 6,
+    "clusterId" : ObjectId("58f5d8c770e65b42550653b6")
+}
+  shards:
+    {  "_id" : "shard0000",  "host" : "localhost:30000",  "tags" : [ "LTS" ] }
+    {  "_id" : "shard0001",  "host" : "localhost:30001",  "tags" : [ "STS" ] }
+    {  "_id" : "shard0002",  "host" : "localhost:30002",  "tags" : [ "LTS" ] }
+  balancer:
+    Currently enabled:  yes
+    Currently running:  no
+    Failed balancer rounds in last 5 attempts:  0
+    Migration Results for the last 24 hours:
+        79 : Success
+  databases:
+    {  "_id" : "admin",  "partitioned" : false,  "primary" : "config" }
+    {  "_id" : "testDB",  "partitioned" : true,  "primary" : "shard0001" }
+        testDB.testColl
+            shard key: { "createdDate" : 1 }
+            chunks:
+                shard0000    62
+                shard0001    90
+                shard0002    62
+            too many chunks to print, use verbose if you want to force print
+             tag: LTS  { "createdDate" : ISODate("2013-10-01T00:00:00Z") } -->> { "createdDate" : ISODate("2014-02-01T00:00:00Z") }
+             tag: STS  { "createdDate" : ISODate("2014-02-01T00:00:00Z") } -->> { "createdDate" : ISODate("2014-05-01T00:00:00Z") }
+
 ```
