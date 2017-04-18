@@ -217,7 +217,7 @@ mongos> db.tags.find()
 ```
 
 * Create new tag ranges
-```
+```bash
 mongo --port 30999
 > use config
 mongos> sh.addTagRange("testDB.testColl", {createdDate : ISODate("2013-10-01T00:00:00Z")}, {createdDate : ISODate("2014-02-01T00:00:00Z")}, "LTS")
